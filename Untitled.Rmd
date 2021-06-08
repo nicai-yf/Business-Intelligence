@@ -1,0 +1,418 @@
+---
+title: "AssignmentB_Yifei.Wang"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# ha3
+
+```{r }
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+library(gplots) # plotting library
+library(caret) #  different modeling functions to center our data by subtracting its mean
+library(MASS)  #  Functions and data sets to support Venables and Ripley
+library(repr) # serialize Representations. String and binary representations of object
+library(magrittr)  # to use piping %>%
+library(reshape2)  # for data manipulation
+```
+
+First fix seed for the session, then read the housing dataset, finally select relevant features for analysis and form new dataframe.
+```{r }
+# fix seed for the session
+set.seed(42)
+
+# read the housing dataset
+train <- read.csv("train.csv")
+
+# select relevant features for analysis
+select_var <- c('Id','LotArea','MSZoning','Utilities', 'Neighborhood','BldgType','HouseStyle',
+                'OverallQual','OverallCond','YearBuilt', 'ExterQual','ExterCond',
+                'BsmtQual','BsmtCond','TotalBsmtSF','Heating','HeatingQC', 
+                'CentralAir','Electrical','GrLivArea','BedroomAbvGr','KitchenAbvGr',
+                'KitchenQual','TotRmsAbvGrd','Functional','Fireplaces','FireplaceQu',
+                'GarageArea','GarageQual','GarageCond','OpenPorchSF','PoolArea',
+                'Fence','MoSold','YrSold','SaleType','SaleCondition','SalePrice')
+
+# form new dataframe with relevant featrures only
+select_train <- train[,select_var]
+head(select_train)
+```
+## SECTION ANOMALY DETECTION
+Make anomaly detection analysis on log(SalePrice) and log(LotArea) features.
+```{r }
+select_train$lLotArea <- log(select_train$LotArea)
+
+select_train$lSalePrice <- log(select_train$SalePrice)
+
+X<-select_train[,c('lSalePrice','lLotArea')]
+
+head(X)
+```
+Make preprocessing of dataframe by substracting the mean, which means make the mean = 0.
+```{r }
+preObj <- preProcess(X,method="center")
+```
+
+Center the data, subtracting the column means from the data points.
+```{r }
+X2 <- predict(preObj,X)
+```
+
+Then convert X2 variables to a matrix and generate a diagnoal matrix from X2 variables matrix as sigma2.
+```{r }
+X2= as.matrix(X2)
+sigma2=diag(var(X2))
+sigma2
+```
+Then generate a diagonal matrix from sigma2.
+```{r }
+sigma2=diag(sigma2)
+sigma2
+```
+
+Multivariate probability in case of two variables from the lecture and coefficient that stands before Exponentials.
+```{r }
+A=(2*pi)^(-ncol(X2)/2)*det(sigma2)^(-0.5)
+# Gaussian exp takes form:
+B = exp(-0.5 *rowSums((X2%*%ginv(sigma2))*X2))
+p=A*B
+```
+
+Pass p as a dataframe and plot distribution of calculated probabilities.
+```{r }
+p= p%>%as.data.frame()
+names(p)= c('probability')
+p%>%ggplot(aes(probability))+geom_density(fill='skyblue')+
+  ggtitle('Distribution of calculated probabilities')
+```
+Combine X with calculated probabilities.
+```{r }
+X= cbind(X,p)
+```
+### START MY CODE
+Select threshold = 0.00005 , such that number of outliers would be equal to 5 points
+```{r }
+bestEpsilon= 0.00005
+  X$outliers= X$probability < bestEpsilon
+X$outliers=as.factor(X$outliers)
+```
+Print number of "normal" and "abnormal" data points. The number of true is the number of outliers
+```{r}
+table(X$outliers)
+```
+Superimpose isosurface of probabilities on data with points marked  in blue as outliers.
+```{r}
+X%>%ggplot(aes(x=`lSalePrice`,y=`lLotArea`))+
+  geom_point(aes(color=outliers))+ stat_density2d(color='red')+ggtitle('Anomaly Detection')
+```
+According to the figure, we could know 5 blue points represented for abnormal data.
+
+# ha4
+First, we focus on classification problem.To do so, we assign house prices to three classes : cheap, medium and expensive price. On the next step we build the model based on features that predicts class of the house.
+
+Install required pagages.
+Read the train data and test data.
+```{r }
+library(neuralnet) # Importnat package for building neural nets
+library(nnet)
+library(ggplot2)
+library(gplots)
+library (ROCR)
+library(ramify)
+library(e1071)
+library(MLmetrics)
+train <- read.csv("train.csv", header = TRUE)
+test <- read.csv("test.csv", header = TRUE)
+```
+
+To simplify the neural network implementation, we only considers 5 coulmns when implementing the Kaggle's House Price problem.
+The five features are:
+1. SalePrice, 
+2. "OverallQual", 
+3. "GrLivArea", 
+4. "TotalBsmtSF", 
+5. "GarageCars",
+6. "FullBath"
+
+Extract required columns to train and test dataset and store for scaling back thepredictions.
+```{r}
+train <- train[,c("OverallQual", "GrLivArea", "TotalBsmtSF", "GarageCars",
+                  "FullBath", "SalePrice")]
+
+test <- test[,c("OverallQual", "GrLivArea", "TotalBsmtSF", "GarageCars",
+                "FullBath")]
+
+#Storing for Scaling back the predictions..
+train_o <- train
+
+# fix seed for the session
+set.seed(42)
+```
+
+## DATA CLEANING:
+Frist check for missing/ NA's values in the train data and the test data.
+Then drop too small values.
+```{r}
+# check for missing/ NA's values in the train data
+summary(train$SalePrice) 
+summary(train$OverallQual) 
+summary(train$GrLivArea)
+summary(train$TotalBsmtSF)
+summary(train$GarageCars)
+summary(train$FullBath)
+
+# check for missing/ NA's values in the test data
+summary(test$SalePrice) 
+summary(test$OverallQual)
+summary(test$GrLivArea)
+summary(test$TotalBsmtSF)
+summary(test$GarageCars)
+summary(test$FullBath)
+
+#Drop too small values 
+train<-train[!(abs(train$SalePrice)<1e-5),]
+```
+
+### START MY CODE
+Replace missing value with median for other features for test and train.And according to the summary, we know that there are NA numbers in the TotalBsmtSF and GarageCars of test data.
+```{r}
+train$SalePrice[which(is.na(train$SalePrice))]<-summary(train$SalePrice)[3]
+
+test$TotalBsmtSF[which(is.na(test$TotalBsmtSF))] <-summary(test$TotalBsmtSF)[3]
+test$GarageCars[which(is.na(test$GarageCars))] <- summary(test$GarageCars)[3] # 2.0
+test$OverallQual[which(is.na(test$OverallQual))] <- summary(test$OverallQual)[3]
+test$TotalBsmtSF[which(is.na(test$TotalBsmtSF))] <- summary(test$TotalBsmtSF)[3]
+test$GarageCars[which(is.na(test$GarageCars))] <- summary(test$GarageCars)[3]
+test$FullBath[which(is.na(test$FullBath))] <- summary(test$FullBath)[3]
+```
+
+We keep original dataset and then scale or normalization the dataset. 
+We want to get all the values falling between 0 and 1 in the selected dataset.
+1.Normalization brings all the vlaues in the required range.
+2.For this problem, the range is 0 to 1. Therefore, after scaling
+```{r}
+train_o <- train
+
+# A USer Defined Function to scale
+UDF <- function(x) {
+  (x -min(x))/ (max(x)- min(x))
+}
+
+# Apply the function both to the train and test set
+train <- as.data.frame(apply(train, 2, UDF))
+test <- as.data.frame(apply(test, 2, UDF))
+```
+
+First we calculate quantiles and make categories depending to which quantile SalePrice belongs. 
+We label cheap houses with 0, medium with 1 and expansive  with 2
+```{r}
+# Calculate quantiles 
+qn=quantile(train$SalePrice)
+
+train$Pricelabel[train$SalePrice<=qn[2]] <- 0 
+train$Pricelabel[train$SalePrice>qn[2] & train$SalePrice<qn[4]] <- 1  
+train$Pricelabel[train$SalePrice>=qn[4] ] <- 2
+
+# Drop SalePrice, since we replaced it with labels
+train<- train[ , !(names(train) %in%  c("SalePrice"))]
+```
+
+We introduce 3 new columns :"cheap","medium","expansive" and house price can belong to one of them. 
+In this case the value in column would be 1 and 0 otherwise.
+```{r}
+train <- cbind(train[, 1:5], class.ind(as.factor(train$Pricelabel)))
+names(train) <- c(names(train)[1:5],"cheap","medium","expansive")
+```
+
+Split data for train and cross-validation set.
+We randomly select 0.6 datapoints for the train set and the rest for cross-validation
+Besides, we select train data from train dataframe and cross validation data from test dataframe.
+```{r}
+index <- sample(nrow (train), round(0.6 * nrow(train)))
+# Select train data from train dataframe to train.wp by index
+train.wp <- train[index,]
+# Select cross validation data from train dataframe to test.wp, that is not in index
+test.wp <- train[-index,]
+```
+
+### START MY CODE
+We make formula to predict 3 labels:cheap + medium + expansive.
+The form variable should have the form cheap + medium + expansive ~ features.
+I'll construct it below.
+```{r}
+# Select all feature names
+allVars <- colnames(train)
+# Select feature names, that are used for prediction of SalePrice
+predictorVars <- allVars[!allVars%in%"cheap"&!allVars%in%"medium"&!allVars%in%"expansive"]
+predictorVars <- paste(predictorVars, collapse = "+")
+form = as.formula(paste("cheap+medium+expansive~", predictorVars, collapse = "+"))
+```
+
+Prediction Model
+Hidden-secifies number of hidden neurons.
+Linear.output = false, when we have classification problem.
+act.fct = "logistic" - specifies activation function. Since we have classification we should use logistic function
+```{r}
+nn_model <- neuralnet(formula = form, train.wp, 
+                      hidden = c(2,2), 
+                      act.fct = "logistic", 
+                      linear.output = FALSE
+                      )
+```
+
+Plot the fitted values i.e. weights
+```{r}
+nn_model$net.result
+```
+
+```{r}
+plot(nn_model)
+```
+Calculate preditictions based on features
+```{r}
+prediction.train.wp <- compute(nn_model, train.wp[,1:5])
+#prediction.train.wp
+prediction.test.wp <- compute(nn_model, test.wp[,1:5])
+#prediction.test.wp
+```
+
+## QUESTIONs: 
+###1. Why prediction of the model has now 3 numbers and not 1 like in regression?
+Because when predicting in regression, we only have 1-dim result like SalePrice. We want to according to the other features to get the SalePrice.
+But now we want to classify the house in to 3 categories, including cheap, medium and expansive. And our target is classification cheap+medium+expansive~.
+###2. How would you interpret these 3 values? Can they be negative? Their sum is close to which number?
+I would compare these 3 values. For one house, which value is larger means the house belongs to this category. For example, cheap:0.619, medium:0.379, expansive:3.14e-06, it means the house is cheap one.
+They would not be negative. Because the orignial data range form 0 to 1.
+And their sum is close to 1.
+
+```{r}
+results <-as.data.frame(prediction.test.wp$net.result)
+names(results) <- c("cheap","medium","expansive")
+
+# construct confusion Matrix comparing true labels and predicted
+# in order to find label with the highest probability we apply argmax function to each row 
+confusionMatrix(factor(argmax(test.wp[,6:8])),factor(argmax(prediction.test.wp$net.result)))
+```
+
+## QUESTIONs: 
+### 1. Which class is predicted with the best accuracy? The worst?
+According to the Balanced Accuracy, Class 3 is predicted with the best accuracy. Class 2 is the worst one.
+### 2. In results datafarme each row contains 3 values. How would you interpret them? 
+###    Can they be negative? Their sum is close to which number?
+I would compare these 3 values. For one house, which value is larger means the house belongs to which Class.
+The values couldn't be negative.
+And the sum is close to 1.
+
+### START My CODE
+Apply function table() to actual data and predictedm similarly to the confusionMatrix above
+```{r}
+table(argmax(test.wp[,6:8]),argmax(prediction.test.wp$net.result))
+```
+
+Then insert correct cells from the table above into the print statements below:
+```{r}
+print(paste0('Number of correct predicted cheap houses: ',  97   ))
+print(paste0('Number of correct predicted medium houses: ',   265  ))
+print(paste0('Number of correct predicted expensive houses: ',  118   ))
+
+print(paste0('Number of predicted false negative cheap houses: ',  '19+0=19'  ))
+print(paste0('Number of predicted false positives cheap houses: ',   '39+1=40'  ))
+
+print(paste0('Number of predicted false negative medium houses: ',  '39+33=72'   ))
+print(paste0('Number of predicted false positives medium houses: ',  '19+12=31'   ))
+
+print(paste0('Number of predicted false negative expensive houses: ',  '1+12=13'   ))
+print(paste0('Number of predicted false positives expensive houses: ', ' 0+33=33  ' ))
+```
+
+Below we calculate with the help of library "MLmetrics" Precision and Recal metrics, that describe how good is our classification.
+Precision is the number of true positives divided by the total number of elements labeled as belonging to the positive class,
+Recall in this context is defined as the number of true positives divided by the total number of elements that actually belong to the positive class
+```{r}
+Precision1 <- Recall(argmax(test.wp[,6:8]), argmax(prediction.test.wp$net.result))
+Recall1 <- Precision(argmax(test.wp[,6:8]), argmax(prediction.test.wp$net.result))
+paste("Precision1=",Precision1) 
+paste("Recall1=",Recall1)
+```
+
+### START My CODE
+However  the better metrics, that combines both precision and recall is F1 score
+F1 score is given by the ratio of numerator:  2*precision * recall 
+to denominator: (precision + recall)
+Implement this formula and calculate F1 score:
+```{r}
+F1score<-(2*Precision1*Recall1)/(Precision1+Recall1)
+paste("F1score=",F1score)
+```
+
+Use F1 score metric to select the best NN from following architectures:
+According to the F1 score metric, second model-1 hidden layers with 1 node each is the best one from following architectures. 
+And the first one is worst since its complication and nodes number make it's difficult to calculate the gradients when calculating the weights.
+
+1. 1 hidden layer with 5 nodes
+
+```{r}
+nn_model1 <- neuralnet(formula = form, train.wp, 
+                      hidden = 5, 
+                      threshold=0.1,
+                      act.fct = "logistic", 
+                      linear.output = FALSE
+                      )
+nn_model1$net.result
+plot(nn_model1)
+```
+
+```{r}
+prediction.train.wp1 <- compute(nn_model1, train.wp[,1:5])
+prediction.test.wp1<- compute(nn_model1, test.wp[,1:5])
+Precision2 <- Recall(argmax(test.wp[,6:8]), argmax(prediction.test.wp1$net.result))
+Recall2 <- Precision(argmax(test.wp[,6:8]), argmax(prediction.test.wp1$net.result))
+F1score1<-(2*Precision2*Recall2)/(Precision2+Recall2)
+paste("F1score1=",F1score1)
+```
+
+
+2. 1 hidden layers with 1 node each  
+```{r}
+nn_model2 <- neuralnet(formula = form, train.wp, 
+                      hidden = 1, 
+                      act.fct = "logistic", 
+                      linear.output = FALSE,
+                      
+                      )
+nn_model2$net.result
+plot(nn_model2)
+```
+```{r}
+prediction.train.wp2 <- compute(nn_model2, train.wp[,1:5])
+prediction.test.wp2 <- compute(nn_model2, test.wp[,1:5])
+Precision3 <- Recall(argmax(test.wp[,6:8]), argmax(prediction.test.wp2$net.result))
+Recall3 <- Precision(argmax(test.wp[,6:8]), argmax(prediction.test.wp2$net.result))
+F1score2<-(2*Precision3*Recall3)/(Precision3+Recall3)
+paste("F1score2=",F1score2)
+```
+3. 2 hidden layers with 3 nodes in first layer and 1 node in second
+```{r}
+nn_model3 <- neuralnet(formula = form, train.wp, 
+                      hidden = c(3,1), 
+                      act.fct = "logistic", 
+                      linear.output = FALSE
+                      )
+nn_model3$net.result
+plot(nn_model3)
+```
+
+```{r}
+prediction.train.wp3 <- compute(nn_model3, train.wp[,1:5])
+prediction.test.wp3 <- compute(nn_model3, test.wp[,1:5])
+Precision4 <- Recall(argmax(test.wp[,6:8]), argmax(prediction.test.wp3$net.result))
+Recall4 <- Precision(argmax(test.wp[,6:8]), argmax(prediction.test.wp3$net.result))
+F1score3<-(2*Precision4*Recall4)/(Precision4+Recall4)
+paste("F1score3=",F1score3)
+```
